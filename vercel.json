@@ -1,7 +1,7 @@
 {
     "version": 2,
     "buildCommand": "",
-    "outputDirectory": "www",
+    "outputDirectory": "TourChain/frontend/tourist/www",
     "rewrites": [
         {
             "source": "/(.*)",
