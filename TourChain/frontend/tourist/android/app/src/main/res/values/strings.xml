@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TourChain Tourist</string>
+    <string name="title_activity_main">TourChain Tourist</string>
+    <string name="package_name">com.tourchain.tourist</string>
+    <string name="custom_url_scheme">com.tourchain.tourist</string>
+</resources>
