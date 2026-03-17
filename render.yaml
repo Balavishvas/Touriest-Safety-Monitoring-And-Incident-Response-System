@@ -3,6 +3,7 @@ services:
   - type: web
     name: tourchain-ai-engine
     env: python
+    plan: free
     rootDir: TourChain/backend/ai_engines
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
@@ -11,6 +12,7 @@ services:
   - type: web
     name: tourchain-tourist-backend
     env: node
+    plan: free
     rootDir: TourChain/backend
     buildCommand: npm install
     startCommand: npm start
@@ -29,6 +31,7 @@ services:
   - type: web
     name: tourchain-police-backend
     env: node
+    plan: free
     rootDir: TourChain/police_backend
     buildCommand: npm install
     startCommand: npm start
