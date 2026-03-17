@@ -1,0 +1,39 @@
+services:
+  # 1. AI Engine (Python)
+  - type: web
+    name: tourchain-ai-engine
+    env: python
+    rootDir: TourChain/backend/ai_engines
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+
+  # 2. Tourist Backend (Node.js)
+  - type: web
+    name: tourchain-tourist-backend
+    env: node
+    rootDir: TourChain/backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGO_URI
+        sync: false # You will need to paste your Mongo URI in Render dashboard
+      - key: JWT_SECRET
+        sync: false
+      - key: AI_SERVICE_URL
+        fromService:
+          type: web
+          name: tourchain-ai-engine
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # 3. Police Dashboard Backend (Node.js)
+  - type: web
+    name: tourchain-police-backend
+    env: node
+    rootDir: TourChain/police_backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
