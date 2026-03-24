@@ -4,34 +4,31 @@ require("dotenv").config();
 const RPC = process.env.BLOCKCHAIN_RPC || "http://127.0.0.1:8545";
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
-const ABI_ARTIFACT = require("../utils/abi/TourChainLedger.json");
-const ABI = ABI_ARTIFACT.abi;
 
-const provider = new ethers.JsonRpcProvider(RPC);
+// Check if blockchain is configured
+const BLOCKCHAIN_ENABLED = !!(PRIVATE_KEY && CONTRACT_ADDRESS && process.env.BLOCKCHAIN_RPC);
 
-let wallet;
-try {
-    if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY missing in .env");
-    wallet = new ethers.Wallet(PRIVATE_KEY, provider);
-} catch (e) {
-    console.error("Initialization Error: Failed to create wallet.", e.message);
-}
+let provider, wallet, contract;
 
-let contract;
-try {
-    if (wallet && CONTRACT_ADDRESS) {
+if (BLOCKCHAIN_ENABLED) {
+    try {
+        const ABI_ARTIFACT = require("../utils/abi/TourChainLedger.json");
+        const ABI = ABI_ARTIFACT.abi;
+
+        provider = new ethers.JsonRpcProvider(RPC);
+
+        wallet = new ethers.Wallet(PRIVATE_KEY, provider);
         contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
-        console.log(`Blockchain Service Initialized. Contract: ${CONTRACT_ADDRESS}`);
-    } else {
-        console.warn("Blockchain Service Warning: Contract not initialized. Missing wallet or CONTRACT_ADDRESS.");
+        console.log(`✅ Blockchain Service Initialized. Contract: ${CONTRACT_ADDRESS}`);
+    } catch (e) {
+        console.warn("⚠️ Blockchain Service failed to initialize:", e.message);
     }
-} catch (e) {
-    console.error("Initialization Error: Failed to create contract instance.", e.message);
+} else {
+    console.warn("⚠️ Blockchain Service DISABLED: BLOCKCHAIN_RPC / PRIVATE_KEY / CONTRACT_ADDRESS not set. Journeys will be recorded in DB only.");
 }
 
 function toJourneyId(idString) {
     if (!idString) {
-        console.warn("toJourneyId called with empty string");
         return ethers.keccak256(ethers.toUtf8Bytes("default-id"));
     }
     try {
@@ -48,16 +45,16 @@ function createPanicDataHash(panicData) {
 }
 
 async function recordJourneyStart(journeyData) {
-    if (!contract) throw new Error("Blockchain contract not initialized");
+    if (!BLOCKCHAIN_ENABLED || !contract) {
+        console.warn("⚠️ Blockchain disabled — skipping recordJourneyStart");
+        return null;
+    }
 
     try {
-        console.log("DEBUG: recordJourneyStart input:", JSON.stringify(journeyData));
         const idStr = journeyData._id.toString();
         let journeyId = toJourneyId(idStr);
 
-        // Safety check for 0x prefix
         if (!journeyId.startsWith('0x')) {
-            console.warn(`WARNING: journeyId '${journeyId}' missing 0x prefix. Prepending.`);
             journeyId = '0x' + journeyId;
         }
 
@@ -67,54 +64,50 @@ async function recordJourneyStart(journeyData) {
         console.log(`DEBUG: Sending transaction startJourney('${journeyId}', ${startDate}, ${endDate})`);
 
         const tx = await contract.startJourney(journeyId, startDate, endDate);
-        console.log(`DEBUG: Tx sent: ${tx.hash}. Waiting for confirmation...`);
-
         const receipt = await tx.wait();
         console.log(`✅ Journey Start Recorded. TxHash: ${receipt.hash}`);
         return receipt.hash;
     } catch (error) {
-        console.error("❌ Blockchain Error in recordJourneyStart:", error);
-        if (error.reason) console.error("Reason:", error.reason);
-        if (error.code) console.error("Code:", error.code);
-        if (error.argument) console.error("Argument:", error.argument);
-        if (error.value) console.error("Value:", error.value);
+        console.error("❌ Blockchain Error in recordJourneyStart:", error.message);
         throw error;
     }
 }
 
 async function recordPanicEvent(panicData) {
-    if (!contract) throw new Error("Blockchain contract not initialized");
+    if (!BLOCKCHAIN_ENABLED || !contract) {
+        console.warn("⚠️ Blockchain disabled — skipping recordPanicEvent");
+        return null;
+    }
 
     try {
         const journeyId = toJourneyId(panicData.journeyId.toString());
         const dataHash = createPanicDataHash(panicData);
-
-        console.log(`DEBUG: Sending transaction alertPanic('${journeyId}', '${dataHash}')`);
 
         const tx = await contract.alertPanic(journeyId, dataHash);
         const receipt = await tx.wait();
         console.log(`🚨 Panic Event Recorded. TxHash: ${receipt.hash}`);
         return receipt.hash;
     } catch (error) {
-        console.error("❌ Blockchain Error in recordPanicEvent:", error);
+        console.error("❌ Blockchain Error in recordPanicEvent:", error.message);
         throw error;
     }
 }
 
 async function recordJourneyEnd(journeyData) {
-    if (!contract) throw new Error("Blockchain contract not initialized");
+    if (!BLOCKCHAIN_ENABLED || !contract) {
+        console.warn("⚠️ Blockchain disabled — skipping recordJourneyEnd");
+        return null;
+    }
 
     try {
         const journeyId = toJourneyId(journeyData._id.toString());
-
-        console.log(`DEBUG: Sending transaction endJourney('${journeyId}')`);
 
         const tx = await contract.endJourney(journeyId);
         const receipt = await tx.wait();
         console.log(`🏁 Journey End Recorded. TxHash: ${receipt.hash}`);
         return receipt.hash;
     } catch (error) {
-        console.error("❌ Blockchain Error in recordJourneyEnd:", error);
+        console.error("❌ Blockchain Error in recordJourneyEnd:", error.message);
         throw error;
     }
 }

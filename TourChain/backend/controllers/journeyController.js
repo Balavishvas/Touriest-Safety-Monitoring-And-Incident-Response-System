@@ -39,10 +39,8 @@ exports.startJourney = async (req, res) => {
         try {
             activeJourney.blockchainTxHashes.start = await recordJourneyStart(activeJourney);
         } catch (blockchainError) {
-            console.error('Blockchain Error during startJourney:', blockchainError.message);
-            // Optionally remove the activeJourney if blockchain fails to keep it atomic
-            await ActiveJourney.findByIdAndDelete(activeJourney._id);
-            throw new Error(`Failed to record journey on blockchain: ${blockchainError.message}`);
+            // Blockchain is optional — log the error but do NOT block the journey
+            console.warn('⚠️ Blockchain unavailable (journey still saved to DB):', blockchainError.message);
         }
 
         await activeJourney.save();
@@ -79,7 +77,11 @@ exports.triggerPanic = async (req, res) => {
             location: { lat, lng },
             type: type
         });
-        journey.blockchainTxHashes.panic = await recordPanicEvent(panicCall);
+        try {
+            journey.blockchainTxHashes.panic = await recordPanicEvent(panicCall);
+        } catch (blockchainError) {
+            console.warn('⚠️ Blockchain unavailable (panic still saved to DB):', blockchainError.message);
+        }
         await panicCall.save();
         await journey.save();
         if (!res.headersSent) {
@@ -152,7 +154,11 @@ exports.endJourney = async (req, res) => {
             return res.status(401).json({ message: 'Not authorized to end this journey.' });
         }
         journey.status = 'Ended';
-        journey.blockchainTxHashes.end = await recordJourneyEnd(journey);
+        try {
+            journey.blockchainTxHashes.end = await recordJourneyEnd(journey);
+        } catch (blockchainError) {
+            console.warn('⚠️ Blockchain unavailable (journey end still saved to DB):', blockchainError.message);
+        }
         await journey.save();
         res.json({ message: 'Journey ended and logged on-chain.', journey });
     } catch (error) {
