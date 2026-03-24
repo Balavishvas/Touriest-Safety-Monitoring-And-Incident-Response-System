@@ -1,12 +1,9 @@
-# main.py
-
 import datetime
 import json
+import math
 from typing import List, Tuple
 
-import joblib
 import numpy as np
-import tensorflow as tf
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -15,16 +12,7 @@ app = FastAPI(
     description="API for Safety Score and Anomaly Detection."
 )
 
-try:
-    MODEL = tf.keras.models.load_model("tourist_anomaly_model.h5", compile=False)
-    
-    SCALER = joblib.load("scaler.gz")
-    with open("threshold.json", 'r') as f:
-        THRESHOLD = json.load(f)['threshold']
-    print("✅ Anomaly detection model and helpers loaded successfully.")
-except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    MODEL, SCALER, THRESHOLD = None, None, None
+print("✅ Tourist Safety AI Engine started (lightweight mode - no TensorFlow).")
 
 class TouristData(BaseModel):
     current_area: str
@@ -37,8 +25,7 @@ class LocationSequence(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "Tourist Safety API is running!"}
-
+    return {"status": "Tourist Safety API is running!", "mode": "lightweight"}
 
 @app.post("/calculate-score/")
 def get_safety_score(data: TouristData):
@@ -50,7 +37,7 @@ def get_safety_score(data: TouristData):
     risk_factors = []
 
     hour = data.current_hour if data.current_hour is not None else datetime.datetime.now().hour
-    if hour < 6 or hour > 22: 
+    if hour < 6 or hour > 22:
         base_score -= 2.0
         risk_factors.append("Late-night activity")
 
@@ -63,42 +50,76 @@ def get_safety_score(data: TouristData):
         deviation_penalty = data.deviation_km * 0.5
         base_score -= deviation_penalty
         risk_factors.append(f"Route deviation ({data.deviation_km} km)")
-    
+
     area_risk_scores = {
-        "park_street": 0,       # Safe area
-        "victoria_memorial": 0, # Safe area
-        "howrah_station_area": -1, # Moderately risky at night
-        "unlit_alley": -3         # High risk
+        "park_street": 0,
+        "victoria_memorial": 0,
+        "howrah_station_area": -1,
+        "unlit_alley": -3
     }
-    area_penalty = area_risk_scores.get(data.current_area.lower().replace(" ", "_"), -0.5) # Default penalty for unknown areas
+    area_penalty = area_risk_scores.get(data.current_area.lower().replace(" ", "_"), -0.5)
     if area_penalty < 0:
         base_score -= abs(area_penalty)
         risk_factors.append(f"Entered a potentially unsafe area: {data.current_area}")
-    final_score = max(0, round(base_score, 2))
 
+    final_score = max(0, round(base_score, 2))
     return {
         "safety_score": final_score,
         "risk_factors": risk_factors
     }
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate distance in km between two GPS points."""
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 @app.post("/detect-anomaly/")
 def detect_anomaly(sequence: LocationSequence):
-    if not all([MODEL, SCALER, THRESHOLD]):
-         raise HTTPException(status_code=500, detail="Model not loaded. Please check server logs.")
-
+    """
+    Lightweight rule-based anomaly detection using GPS movement patterns.
+    Detects: sudden teleportation, complete stillness, erratic movement.
+    """
     if len(sequence.locations) != 20:
         raise HTTPException(status_code=400, detail="Input must contain exactly 20 location points.")
 
     try:
-        tourist_path = np.array(sequence.locations).reshape(1, 20, 2)
-        tourist_path_scaled = SCALER.transform(tourist_path.reshape(-1, 2)).reshape(1, 20, 2)
-        reconstruction = MODEL.predict(tourist_path_scaled)
-        loss = np.mean(tf.keras.losses.mae(reconstruction, tourist_path_scaled))
-        is_anomaly = loss > THRESHOLD
+        locs = sequence.locations
+        distances = []
+        for i in range(1, len(locs)):
+            d = haversine(locs[i-1][0], locs[i-1][1], locs[i][0], locs[i][1])
+            distances.append(d)
+
+        avg_dist = np.mean(distances)
+        max_dist = np.max(distances)
+        std_dist = np.std(distances)
+
+        is_anomaly = False
+        reconstruction_loss = float(avg_dist)
+
+        # Rule 1: Sudden teleportation (one jump > 2km between consecutive points)
+        if max_dist > 2.0:
+            is_anomaly = True
+            reconstruction_loss = float(max_dist)
+
+        # Rule 2: Complete stillness (tourist hasn't moved at all)
+        elif avg_dist < 0.001:
+            is_anomaly = True
+            reconstruction_loss = 0.001
+
+        # Rule 3: Very erratic movement (high std deviation relative to average)
+        elif std_dist > avg_dist * 2 and avg_dist > 0.01:
+            is_anomaly = True
+            reconstruction_loss = float(std_dist)
+
+        threshold = 2.0
 
         return {
             "is_anomaly": bool(is_anomaly),
-            "reconstruction_loss": float(loss),
-            "threshold": float(THRESHOLD)
+            "reconstruction_loss": round(reconstruction_loss, 6),
+            "threshold": threshold
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred during prediction: {str(e)}")
